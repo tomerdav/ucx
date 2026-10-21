@@ -27,6 +27,7 @@ typedef enum {
 typedef struct {
     ucs_sys_bus_id_t        bus_id;
     char                    *name;
+    char                    *sysfs_path; /* Resolved at registration */
     unsigned                name_priority;
     ucs_numa_node_t         numa_node;
     ucs_sys_pci_id_t        pci_id;

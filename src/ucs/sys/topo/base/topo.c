@@ -400,13 +400,15 @@ ucs_topo_get_sysfs_pci_id(const char *dev_name, const char *sysfs_path)
 static void ucs_topo_read_device_sysfs_info(const ucs_sys_bus_id_t *bus_id,
                                             const char *dev_name,
                                             ucs_numa_node_t *numa_node_p,
-                                            ucs_sys_pci_id_t *pci_id_p)
+                                            ucs_sys_pci_id_t *pci_id_p,
+                                            char **sysfs_path_p)
 {
     char *path;
     ucs_status_t status;
 
-    *numa_node_p = UCS_NUMA_NODE_UNDEFINED;
-    *pci_id_p    = UCS_SYS_PCI_ID_UNDEFINED;
+    *numa_node_p  = UCS_NUMA_NODE_UNDEFINED;
+    *pci_id_p     = UCS_SYS_PCI_ID_UNDEFINED;
+    *sysfs_path_p = NULL;
 
     status = ucs_string_alloc_path_buffer(&path, "sysfs_path");
     if (status != UCS_OK) {
@@ -418,8 +420,9 @@ static void ucs_topo_read_device_sysfs_info(const ucs_sys_bus_id_t *bus_id,
         goto out_free_path;
     }
 
-    *numa_node_p = ucs_numa_node_of_device(path);
-    *pci_id_p    = ucs_topo_get_sysfs_pci_id(dev_name, path);
+    *numa_node_p  = ucs_numa_node_of_device(path);
+    *pci_id_p     = ucs_topo_get_sysfs_pci_id(dev_name, path);
+    *sysfs_path_p = ucs_strdup(path, "sys_dev_sysfs_path");
 
     ucs_trace("read sysfs info for %s: numa_node %d, vendor %04x, device %04x",
               dev_name, *numa_node_p, pci_id_p->vendor, pci_id_p->device);
@@ -477,6 +480,7 @@ ucs_topo_find_device_by_bus_id_value(const ucs_sys_bus_id_t *bus_id,
     int kh_put_status;
     khiter_t hash_it;
     ucs_status_t status;
+    char *sysfs_path;
     char *name;
 
     ucs_spin_lock(&ucs_topo_global_ctx.lock);
@@ -505,13 +509,15 @@ ucs_topo_find_device_by_bus_id_value(const ucs_sys_bus_id_t *bus_id,
 
         ucs_topo_bus_id_str(bus_id, 1, name, UCS_SYS_BDF_NAME_MAX);
 
-        ucs_topo_read_device_sysfs_info(bus_id, name, &numa_node, &pci_id);
+        ucs_topo_read_device_sysfs_info(bus_id, name, &numa_node, &pci_id,
+                                        &sysfs_path);
 
         *sys_dev_p = ucs_topo_global_ctx.num_devices++;
         device     = &ucs_topo_global_ctx.devices[*sys_dev_p];
 
         device->bus_id          = *bus_id;
         device->name            = name;
+        device->sysfs_path      = sysfs_path;
         device->name_priority   = 0;
         device->numa_node       = numa_node;
         device->pci_id          = pci_id;
@@ -597,14 +603,22 @@ ucs_status_t ucs_topo_get_device_bus_id(ucs_sys_device_t sys_dev,
 static ucs_status_t
 ucs_topo_sys_dev_to_sysfs_path(ucs_sys_device_t sys_dev, char *path, size_t max)
 {
+    const ucs_topo_sys_device_info_t *device;
+
     if (sys_dev >= ucs_topo_global_ctx.num_devices) {
         ucs_error("system device %d is invalid (max: %d)", sys_dev,
                   ucs_topo_global_ctx.num_devices);
         return UCS_ERR_INVALID_PARAM;
     }
 
-    return ucs_topo_bus_id_to_sysfs_path(
-            &ucs_topo_global_ctx.devices[sys_dev].bus_id, path, max);
+    device = &ucs_topo_global_ctx.devices[sys_dev];
+    if (device->sysfs_path == NULL) {
+        return ucs_topo_bus_id_to_sysfs_path(&device->bus_id, path, max);
+    }
+
+    /* Resolved at registration: realpath() walks every symlink of the path */
+    ucs_strncpy_safe(path, device->sysfs_path, max);
+    return UCS_OK;
 }
 
 static int ucs_topo_is_sys_root(const char *path)
@@ -1504,6 +1518,7 @@ static void ucs_topo_release_devices()
     while (ucs_topo_global_ctx.num_devices-- > 0) {
         device = &ucs_topo_global_ctx.devices[ucs_topo_global_ctx.num_devices];
         ucs_free(device->name);
+        ucs_free(device->sysfs_path);
     }
 }
 
