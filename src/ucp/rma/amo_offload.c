@@ -275,7 +275,7 @@ static void ucp_proto_amo_query(const ucp_proto_query_params_t *params,
         .probe    = ucp_proto_amo##_bits##_##_id##_probe, \
         .query    = ucp_proto_amo##_bits##_##_id##_query, \
         .progress = {ucp_proto_amo##_bits##_id##_progress}, \
-        .abort    = ucp_proto_abort_fatal_not_implemented, \
+        .abort    = ucp_proto_request_bcopy_abort, \
         .reset    = ucp_proto_request_bcopy_reset \
     };
 
